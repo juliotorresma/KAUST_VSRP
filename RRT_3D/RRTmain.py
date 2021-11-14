@@ -2,18 +2,19 @@ import random
 import random
 import math
 import pygame
+import pybullet as p
 
 class RRTMAp:
-    def __init__(self,start,goal,MapDimensions,obsdim,obsnum):
+    def __init__(self,start,goal,MapDimensions,obstacles,robot_id,endEffectorIndex,robot_constrains):
         self.start = start
         self.goal = goal
         self.MapDimensions = MapDimensions
         self.mapH, self.mapW, self.mapD = self.MapDimensions
-
-        
-        self.obstacles = []
-        self.obsdim = obsdim
-        self.obsNumber = obsnum
+        self.robot = robot_id
+        self.robot_constrains = robot_constrains
+        self.endEffectorIndex = endEffectorIndex
+        self.obstacles = obstacles
+        self.obsNumber = len(obstacles)
 
         #Colors
         self.gray = (70,70,70)
@@ -30,14 +31,16 @@ class RRTMAp:
 
 
 class RRTGraph:
-    def __init__(self,start,goal,MapDimensions,obsdim,obsnum):
+    def __init__(self,start,goal,MapDimensions,obstacles,robot_id,endEffectorIndex,robot_constrains):
         (x,y,z) = start 
         self.start = start 
         self.goal = goal
+        self.endEffectorIndex = endEffectorIndex
         #True if reach final coordinate
         self.goalFlag = False
         self.maph, self.mapw, self.mapd = MapDimensions
-
+        self.robot = robot_id
+        self.robot_constrains = robot_constrains
         self.x = []
         self.y = []
         self.z = []
@@ -45,7 +48,7 @@ class RRTGraph:
         #initialize tree
         self.x.append(x)
         self.y.append(y)
-        self.y.append(z)
+        self.z.append(z)
         self.parent.append(0)
 
         #initialize tree
@@ -54,9 +57,9 @@ class RRTGraph:
         self.z.append(z)
         self.parent.append(0)
         #obstacles
-        self.obastacles = []
+        self.obastacles = obstacles
            
-        self.obsNum = obsnum
+        self.obsNum = len(obstacles)
         #path
         self.goalState = None
         self.path = []
@@ -92,44 +95,129 @@ class RRTGraph:
 
         return (px+py+pz)**(0.5)
     def sample_envir(self):
-        x = int(random.uniform(0,self.mapw))
-        y = int(random.uniform(0,self.maph))
+        x = int(random.uniform(-self.mapw,self.mapw))
+        y = int(random.uniform(-self.maph,self.maph))
         z = int(random.uniform(0,self.mapd))
 
         return x,y,z
     def nearest(self,n):
-        pass
+        dmin = self.distance(0,n)
+        nnear = 0
+        for i in range(0,n):
+            if self.distance(i,n)<dmin:
+                dmin = self.distance(i,n)
+                nnear = i
+        return nnear
 
     def isFree(self):
         n = self.number_of_nodes()-1
         (x,y,z) = (self.x[n], self.y[n],self.z[n])
         obs = self.obastacles.copy()
+        self.setIK([x,y,z])
         while len(obs)>0:
-            rectang = obs.pop(0)
-            if rectang.collidepoint(x,y):
+            obstacle_i = obs.pop(0)
+            if len(p.getContactPoints(obstacle_i,self.robot)) > 0:
                 self.remove_node(n)
                 return False
         return True
-    def crossObstacle(self,x1,x2,y1,y2):
-        pass
-
+    def crossObstacle(self,x1,x2,y1,y2,z1,z2):
+        obs = self.obastacles.copy()
+        while len(obs)>0:
+            obstacle_i = obs.pop(0)
+            for i in range(0,101):
+                u = i/100
+                x=x1*u + x2*(1-u)
+                y=y1*u + y2*(1-u)
+                z=z1*u + z2*(1-u)
+                
+                self.setIK([x,y,z])
+                if len(p.getContactPoints(obstacle_i,self.robot)) > 0:
+                    return True
+        return False
+    def setIK(self,position):
+        
+        jointPoses = p.calculateInverseKinematics(self.robot, self.endEffectorIndex,
+                                                    position, 1, self.robot_constrains[0], self.robot_constrains[1], 
+                                                        self.robot_constrains[2], self.robot_constrains[3])
+        p.setJointMotorControlArray(bodyUniqueId=self.robot,
+                                        jointIndices=[1, 2, 3, 4, 5, 6, 7],
+                                        controlMode=p.POSITION_CONTROL,
+                                        targetPositions=jointPoses[:7],
+                                        targetVelocities=[0, 0, 0, 0, 0, 0, 0],
+                                        forces=[500, 500, 500, 500, 500, 500, 500],
+                                        positionGains=[0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03],
+                                        velocityGains=[1, 1, 1, 1, 1, 1, 1])
 
     def connect(self,n1,n2):
-        pass
-    def step(self,nnear,nrand,dmax=5):
-        pass
+        (x1,y1,z1) = (self.x[n1],self.y[n1],self.z[n1])
+        (x2,y2,z2) = (self.x[n2],self.y[n2],self.z[n2])
+        
+
+        if self.crossObstacle(x1,x2,y1,y2,z1,z2):
+            self.remove_node(n2)
+            return False
+        else:
+            self.add_edge(n1,n2)
+            return True
+    def step(self,nnear,nrand,dmax=3):
+        d = self.distance(nnear,nrand)
+        if d>dmax:
+            u = dmax/d
+            (xnear,ynear,znear) = (self.x[nnear],self.y[nnear],self.z[nnear])
+            (xrand,yrand,zrand) = (self.x[nrand],self.y[nrand],self.z[nrand])
+            (px,py,pz) = (xrand-xnear,yrand-ynear,zrand-znear)
+            theta = math.atan2(py,px)
+            theta2 = math.atan2(pz,px)
+            (x,y,z) = (int(xnear+dmax * math.cos(theta)),
+                    int(ynear+dmax * math.sin(theta)),
+                    int(znear+dmax * math.sin(theta2)))
+            self.remove_node(nrand)
+            if abs(x-self.goal[0])<dmax and abs(y - self.goal[1])<dmax and abs(z-self.goal[2])<dmax:
+                self.add_node(nrand,self.goal[0], self.goal[1], self.goal[2])
+                self.goalState = nrand
+                self.goalFlag = True
+            else:
+                self.add_node(nrand,x,y,z)
     def path_to_goal(self):
-        pass
+        if self.goalFlag:
+            self.path = []
+            self.path.append(self.goalState)
+            newpos = self.parent[self.goalState]
+            while(newpos!=0):
+                self.path.append(newpos)
+                newpos = self.parent[newpos]
+            self.path.append(0)
+        return self.goalFlag
 
     def getPathCoords(self):
-        pass
+        pathCoords = []
+        for node in self.path:
+            x,y,z = (self.x[node],self.y[node],self.z[node])
+            pathCoords.append((x,y,z))
+        return pathCoords
     #Expand to the goal direction
     def bias(self,ngoal):
-        pass
+        n = self.number_of_nodes()
+        self.add_node(n,ngoal[0],ngoal[1],ngoal[2])
+        nnear = self.nearest(n)
+        self.step(nnear,n)
+        self.connect(nnear,n)
+        return self.x,self.y,self.z,self.parent
     def expand(self):
-        pass
+        n = self.number_of_nodes()
+        x,y,z = self.sample_envir()
+        self.add_node(n,x,y,z)
+        if self.isFree():
+            xnearest = self.nearest(n)
+            self.step(xnearest,n)
+            self.connect(xnearest,n)
+        return self.x,self.y,self.z,self.parent
     def cost(self):
         pass
+
+
+
+     
 
 
 
