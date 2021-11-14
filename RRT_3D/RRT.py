@@ -9,11 +9,12 @@ import math
 import keyboard
 
 def main():
-    dimensions = (30,30,30)
-    start = (-15, -15, 10)
+    dimensions = (20,20,20)
+    start = (-0.003, -0.63, 4.1850000000000005)
     goal = (-15, 15, 10)
     obsdim = 30
     iteration = 0
+    obstacles = []
     obstacle = [[15.1,0, 15.9],[-15.1, 2.1, 10.9],[10.1, 20.1, 7.9],[10.1, -20.1, 7.9]]
 
     #Initialize world
@@ -24,7 +25,7 @@ def main():
         # p.connect(p.SHARED_MEMORY_GUI)
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
     # p.resetDebugVisualizerCamera(0.9, -100, -30, [0, 0, 0.4])
-    p.resetDebugVisualizerCamera(40.0, -500, -400, [0, 0, 1.0])
+    p.resetDebugVisualizerCamera(80.0, -500, -400, [0, 0, 1.0])
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
     model_path = '/assets/robots/kuka/iiwa14_robotiq85.urdf'
@@ -33,11 +34,11 @@ def main():
     scale = 300
     scale_obs = 100
     kukaId = p.loadURDF(model_path, [0, 0, 0], globalScaling=scale*0.1)
-    startId = p.loadURDF(start_end_path, [-15, -15, 10])
+    startId = p.loadURDF(start_end_path, [-0.003, -0.63, 5*(scale*0.1)])
     endId = p.loadURDF(start_end_path, [-15, 15, 10])
     if obstacle:
         for i in obstacle:
-            obstacleId = p.loadURDF(obstacle_path, i, useFixedBase=1, flags=2, globalScaling=scale_obs*0.1)
+            obstacles.append(p.loadURDF(obstacle_path, i, useFixedBase=1, flags=2, globalScaling=scale_obs*0.1))
     
     p.loadURDF("random_urdfs/001/001.urdf", [0, 0.3, 0.3])
     p.resetBasePositionAndOrientation(kukaId, [0, 0, 0], [0, 0, 0, 1])
@@ -57,18 +58,34 @@ def main():
     # joint damping coefficents
     jd = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
 
+    robot_constrains = [ll,ul,jr,rp,jd]
+
     p.setGravity(0, 0, 0)
 
     #Solve RRT Problem
-    #map = RRTMAp(start,goal,dimensions,obsdim,len(obstacle))
-
+    #map = RRTMAp(start,goal,dimensions,obstacles,kukaId,
+    #                   kukaEndEffectorIndex,robot_constrains)
+    graph = RRTGraph(start,goal,dimensions,obstacles,kukaId,
+                       kukaEndEffectorIndex,robot_constrains)
     #Execute RRT simulation
-    while(True):
-        for i in range(numJoints):
-            p.resetJointState(kukaId, jointIndex[i], rp[i])
-        if keyboard.is_pressed('q'):
-            p.disconnect()
-            break
+    iteration  = 0 
+    
+    while(True and iteration<10000):
+        x,y,z = graph.sample_envir()
+        n = graph.number_of_nodes()
+        graph.add_node(n,x,y,z)
+        graph.add_edge(n-1,n)
+        x1,y1,z1 = graph.x[n],graph.y[n],graph.z[n]
+        x2,y2,z2 = graph.x[n-1],graph.y[n-1],graph.z[n-1]
+        #p.loadURDF(start_end_path, [x,y,z])
+        if (graph.isFree()):
+            graph.setIK([x,y,z])
+            #if not graph.crossObstacle(x1,x2,y1,y2,z1,z2):
+            #    p.addUserDebugLine([x1,y1,z1], [x2,y2,z2],lineColorRGB=[0, 0, 1],lineWidth=2.0)
+            
+        p.stepSimulation()
+        
+        iteration+=1
 
     
 
@@ -81,4 +98,3 @@ def main():
 
 if __name__=='__main__':
     main()
-    
