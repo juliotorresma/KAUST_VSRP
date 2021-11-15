@@ -117,6 +117,7 @@ class RRTGraph:
         while len(obs)>0:
             obstacle_i = obs.pop(0)
             if len(p.getContactPoints(obstacle_i,self.robot)) > 0:
+                #print("Contacto")
                 self.remove_node(n)
                 return False
         return True
@@ -124,18 +125,35 @@ class RRTGraph:
         obs = self.obastacles.copy()
         while len(obs)>0:
             obstacle_i = obs.pop(0)
-            for i in range(0,101):
-                u = i/100
+            #x_aux,y_aux,z_aux = 0,0,0
+            for i in range(0,201):
+                u = i/200
                 x=x1*u + x2*(1-u)
                 y=y1*u + y2*(1-u)
                 z=z1*u + z2*(1-u)
                 
-                self.setIK([x,y,z])
+                if i == 0:
+                    self.setIK([x,y,z])
+                else:
+                    self.moveIK([x,y,z])
                 if len(p.getContactPoints(obstacle_i,self.robot)) > 0:
+                    #print("Si topa")
                     return True
+                
+        
         return False
     def setIK(self,position):
         
+        jointPoses = p.calculateInverseKinematics(self.robot, self.endEffectorIndex,
+                                                    position, 1, self.robot_constrains[0], self.robot_constrains[1], 
+                                                        self.robot_constrains[2], self.robot_constrains[3])
+        for _ in range(len(jointPoses)):
+            p.resetJointState(self.robot, _, jointPoses[_])
+        
+        p.stepSimulation()
+
+        #p.resetJointStateMultiDof(self.robot, 0, targetValue=[0,0,50])
+    def moveIK(self,position):
         jointPoses = p.calculateInverseKinematics(self.robot, self.endEffectorIndex,
                                                     position, 1, self.robot_constrains[0], self.robot_constrains[1], 
                                                         self.robot_constrains[2], self.robot_constrains[3])
@@ -146,20 +164,20 @@ class RRTGraph:
                                         targetVelocities=[0, 0, 0, 0, 0, 0, 0],
                                         forces=[500, 500, 500, 500, 500, 500, 500],
                                         positionGains=[0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03],
-                                        velocityGains=[1, 1, 1, 1, 1, 1, 1])
+                                        velocityGains=[10, 10, 10, 10, 10, 10, 10])
+        p.stepSimulation()           
 
     def connect(self,n1,n2):
         (x1,y1,z1) = (self.x[n1],self.y[n1],self.z[n1])
         (x2,y2,z2) = (self.x[n2],self.y[n2],self.z[n2])
         
-
         if self.crossObstacle(x1,x2,y1,y2,z1,z2):
             self.remove_node(n2)
             return False
         else:
             self.add_edge(n1,n2)
             return True
-    def step(self,nnear,nrand,dmax=3):
+    def step(self,nnear,nrand,dmax=2):
         d = self.distance(nnear,nrand)
         if d>dmax:
             u = dmax/d
@@ -182,6 +200,7 @@ class RRTGraph:
         if self.goalFlag:
             self.path = []
             self.path.append(self.goalState)
+            print("Self.goalState",self.goalState)
             newpos = self.parent[self.goalState]
             while(newpos!=0):
                 self.path.append(newpos)
