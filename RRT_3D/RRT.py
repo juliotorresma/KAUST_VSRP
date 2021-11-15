@@ -8,9 +8,10 @@ import numpy as np
 import math
 import keyboard
 
+
 def main():
-    dimensions = (20,20,20)
-    start = (-0.003, -0.63, 4.1850000000000005)
+    dimensions = (40,40,60)
+    start = (-15, -15, 10)
     goal = (-15, 15, 10)
     obsdim = 30
     iteration = 0
@@ -34,19 +35,23 @@ def main():
     scale = 300
     scale_obs = 100
     kukaId = p.loadURDF(model_path, [0, 0, 0], globalScaling=scale*0.1)
-    startId = p.loadURDF(start_end_path, [-0.003, -0.63, 5*(scale*0.1)])
+    startId = p.loadURDF(start_end_path, [-15, -15, 10])
     endId = p.loadURDF(start_end_path, [-15, 15, 10])
+    #p.removeCollisionShape(kukaId)
     if obstacle:
         for i in obstacle:
-            obstacles.append(p.loadURDF(obstacle_path, i, useFixedBase=1, flags=2, globalScaling=scale_obs*0.1))
-    
+            obs_i = p.loadURDF(obstacle_path, i, useFixedBase=1, flags=2, globalScaling=scale_obs*0.1)
+            #p.removeCollisionShape(obs_i)
+            obstacles.append(obs_i)
+
     p.loadURDF("random_urdfs/001/001.urdf", [0, 0.3, 0.3])
     p.resetBasePositionAndOrientation(kukaId, [0, 0, 0], [0, 0, 0, 1])
-    #p.resetBasePositionAndOrientation(obstacleId, obstacle, [0, 0, 0, 1])
+    pos = [-15, -15, 10]
+        # end effector points down, not up (in case useOrientation==1)
+    orn = p.getQuaternionFromEuler([0, -math.pi, 0])
     jointIndex = [1, 2, 3, 4, 5, 6, 7]
     kukaEndEffectorIndex = 8
     numJoints = len(jointIndex)
-
     # lower limits for null space
     ll = [-.967, -2, -2.96, 0.19, -2.96, -2.09, -3.05]
     # upper limits for null space
@@ -70,22 +75,39 @@ def main():
     #Execute RRT simulation
     iteration  = 0 
     
-    while(True and iteration<10000):
-        x,y,z = graph.sample_envir()
+    while(not graph.path_to_goal()):
         n = graph.number_of_nodes()
-        graph.add_node(n,x,y,z)
-        graph.add_edge(n-1,n)
-        x1,y1,z1 = graph.x[n],graph.y[n],graph.z[n]
-        x2,y2,z2 = graph.x[n-1],graph.y[n-1],graph.z[n-1]
-        #p.loadURDF(start_end_path, [x,y,z])
-        if (graph.isFree()):
-            graph.setIK([x,y,z])
-            #if not graph.crossObstacle(x1,x2,y1,y2,z1,z2):
-            #    p.addUserDebugLine([x1,y1,z1], [x2,y2,z2],lineColorRGB=[0, 0, 1],lineWidth=2.0)
-            
-        p.stepSimulation()
-        
+        if iteration%5 == 0:
+            X, Y, Z, Parent = graph.bias(goal)
+            p.addUserDebugLine([X[-1],Y[-1],Z[-1]], [X[Parent[-1]],Y[Parent[-1]],Z[Parent[-1]]],lineColorRGB=[0, 0, 1],lineWidth=3.0)
+            p.addUserDebugText(".",[X[-1],Y[-1],Z[-1]],[0,0,1],5)
+        else:
+            X, Y, Z, Parent = graph.expand()
+            p.addUserDebugLine([X[-1],Y[-1],Z[-1]], [X[Parent[-1]],Y[Parent[-1]],Z[Parent[-1]]],lineColorRGB=[0, 0, 1],lineWidth=3.0)
+            p.addUserDebugText(".",[X[-1],Y[-1],Z[-1]],[0,0,1],5)
+        #print("Entra")
         iteration+=1
+        p.stepSimulation()
+    
+    print("Coordenadas",graph.getPathCoords())
+    path_2_follow = graph.getPathCoords().copy()
+    for coords in path_2_follow:
+        p.addUserDebugText(".",[coords[0],coords[1],coords[2]],[1,0,0],5)
+    i=0
+    '''
+    while len(path_2_follow) > 0:
+        i += 1
+        p.stepSimulation()
+        pos = path_2_follow.pop(0)
+        graph.setIK([pos[0],pos[1],pos[2]])
+
+        p.stepSimulation()
+    '''
+    while(True):
+        p.stepSimulation()
+    
+    #p.disconnect()
+    
 
     
 
@@ -98,3 +120,4 @@ def main():
 
 if __name__=='__main__':
     main()
+    
