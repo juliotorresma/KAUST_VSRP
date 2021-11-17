@@ -5,16 +5,18 @@ import pygame
 import pybullet as p
 
 class RRTMAp:
-    def __init__(self,start,goal,MapDimensions,obstacles,robot_id,endEffectorIndex,robot_constrains):
+    def __init__(self,start,goal,MapDimensions,obstacles,robot_id,endEffectorIndex,lowerLimits,upperLimits):
         self.start = start
         self.goal = goal
         self.MapDimensions = MapDimensions
         self.mapH, self.mapW, self.mapD = self.MapDimensions
         self.robot = robot_id
-        self.robot_constrains = robot_constrains
+        self.lowerLimits = lowerLimits
         self.endEffectorIndex = endEffectorIndex
         self.obstacles = obstacles
         self.obsNumber = len(obstacles)
+        self.upperLimits = upperLimits
+        self.orn = p.getQuaternionFromEuler([0, -math.pi/4, 0])
 
         #Colors
         self.gray = (70,70,70)
@@ -23,15 +25,9 @@ class RRTMAp:
         self.Red = (255,0,0)
         self.white = (255,255,255) 
 
-    def drawPath(self,path):
-        #Draw coordinates in pybullet enviroment
-        pass
-
-
-
 
 class RRTGraph:
-    def __init__(self,start,goal,MapDimensions,obstacles,robot_id,endEffectorIndex,robot_constrains):
+    def __init__(self,start,goal,MapDimensions,obstacles,robot_id,endEffectorIndex,lowerLimits,upperLimits):
         (x,y,z) = start 
         self.start = start 
         self.goal = goal
@@ -40,7 +36,8 @@ class RRTGraph:
         self.goalFlag = False
         self.maph, self.mapw, self.mapd = MapDimensions
         self.robot = robot_id
-        self.robot_constrains = robot_constrains
+        self.lowerLimits = lowerLimits
+        self.upperLimits = upperLimits
         self.x = []
         self.y = []
         self.z = []
@@ -49,6 +46,7 @@ class RRTGraph:
         self.x.append(x)
         self.y.append(y)
         self.z.append(z)
+        self.orn = p.getQuaternionFromEuler([0, -math.pi/4, 0])
         self.parent.append(0)
 
         #initialize tree
@@ -95,9 +93,9 @@ class RRTGraph:
 
         return (px+py+pz)**(0.5)
     def sample_envir(self):
-        x = int(random.uniform(-self.mapw,self.mapw))
-        y = int(random.uniform(-self.maph,self.maph))
-        z = int(random.uniform(0,self.mapd))
+        x = random.uniform(-self.mapw,self.mapw)
+        y = random.uniform(-self.maph,self.maph)
+        z = random.uniform(0,self.mapd)
 
         return x,y,z
     def nearest(self,n):
@@ -120,6 +118,7 @@ class RRTGraph:
                 #print("Contacto")
                 self.remove_node(n)
                 return False
+        
         return True
     def crossObstacle(self,x1,x2,y1,y2,z1,z2):
         obs = self.obastacles.copy()
@@ -140,23 +139,21 @@ class RRTGraph:
                     #print("Si topa")
                     return True
                 
-        
+
         return False
     def setIK(self,position):
         
         jointPoses = p.calculateInverseKinematics(self.robot, self.endEffectorIndex,
-                                                    position, 1, self.robot_constrains[0], self.robot_constrains[1], 
-                                                        self.robot_constrains[2], self.robot_constrains[3])
+                                                    position, self.orn,lowerLimits=self.lowerLimits, upperLimits=self.upperLimits)
         for _ in range(len(jointPoses)):
             p.resetJointState(self.robot, _, jointPoses[_])
         
-        p.stepSimulation()
+        #p.stepSimulation()
 
         #p.resetJointStateMultiDof(self.robot, 0, targetValue=[0,0,50])
     def moveIK(self,position):
         jointPoses = p.calculateInverseKinematics(self.robot, self.endEffectorIndex,
-                                                    position, 1, self.robot_constrains[0], self.robot_constrains[1], 
-                                                        self.robot_constrains[2], self.robot_constrains[3])
+                                                    position, self.orn, lowerLimits=self.lowerLimits, upperLimits=self.upperLimits)
         p.setJointMotorControlArray(bodyUniqueId=self.robot,
                                         jointIndices=[1, 2, 3, 4, 5, 6, 7],
                                         controlMode=p.POSITION_CONTROL,
@@ -165,7 +162,7 @@ class RRTGraph:
                                         forces=[500, 500, 500, 500, 500, 500, 500],
                                         positionGains=[0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03],
                                         velocityGains=[10, 10, 10, 10, 10, 10, 10])
-        p.stepSimulation()           
+        #p.stepSimulation()           
 
     def connect(self,n1,n2):
         (x1,y1,z1) = (self.x[n1],self.y[n1],self.z[n1])
@@ -177,7 +174,7 @@ class RRTGraph:
         else:
             self.add_edge(n1,n2)
             return True
-    def step(self,nnear,nrand,dmax=2):
+    def step(self,nnear,nrand,dmax=.05):
         d = self.distance(nnear,nrand)
         if d>dmax:
             u = dmax/d
@@ -186,9 +183,9 @@ class RRTGraph:
             (px,py,pz) = (xrand-xnear,yrand-ynear,zrand-znear)
             theta = math.atan2(py,px)
             theta2 = math.atan2(pz,px)
-            (x,y,z) = (int(xnear+dmax * math.cos(theta)),
-                    int(ynear+dmax * math.sin(theta)),
-                    int(znear+dmax * math.sin(theta2)))
+            (x,y,z) = ((xnear+dmax * math.cos(theta)),
+                    (ynear+dmax * math.sin(theta)),
+                    (znear+dmax * math.sin(theta2)))
             self.remove_node(nrand)
             if abs(x-self.goal[0])<dmax and abs(y - self.goal[1])<dmax and abs(z-self.goal[2])<dmax:
                 self.add_node(nrand,self.goal[0], self.goal[1], self.goal[2])
@@ -201,6 +198,7 @@ class RRTGraph:
             self.path = []
             self.path.append(self.goalState)
             print("Self.goalState",self.goalState)
+            print("len:self.parent",self.parent)
             newpos = self.parent[self.goalState]
             while(newpos!=0):
                 self.path.append(newpos)
@@ -237,6 +235,7 @@ class RRTGraph:
 
 
      
+
 
 
 
